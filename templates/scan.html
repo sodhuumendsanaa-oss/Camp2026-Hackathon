@@ -1,0 +1,783 @@
+{% extends "base.html" %}
+{% block title %}食材登録{% endblock %}
+
+{% block extra_css %}
+<style>
+  .estimate-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--green-glow);
+    border: 1px solid rgba(74,222,128,0.25);
+    border-radius: 10px;
+    margin-top: 8px;
+    font-size: 0.85rem;
+    color: var(--green-400);
+    animation: fadeIn 0.3s ease;
+  }
+  .estimate-result.ai { background: var(--blue-bg); border-color: rgba(96,165,250,0.25); color: var(--blue-400); }
+  .estimate-result.warn { background: var(--yellow-bg); border-color: rgba(250,204,21,0.25); color: var(--yellow-400); }
+  .estimate-badge { font-size: 0.7rem; padding: 2px 7px; border-radius: 100px; background: rgba(255,255,255,0.1); }
+  #estimateBtn { margin-top: 8px; font-size: 0.82rem; padding: 7px 14px; }
+  #estimateBtn.loading { opacity: 0.6; pointer-events: none; }
+
+  /* タブのスタイル */
+  .scan-tabs {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 12px;
+  }
+  .scan-tab {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-weight: 600;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: var(--transition);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .scan-tab:hover {
+    color: var(--text-primary);
+    background: var(--bg-card);
+  }
+  .scan-tab.active {
+    color: var(--green-400);
+    background: var(--green-glow);
+    border: 1px solid rgba(74, 222, 128, 0.2);
+  }
+
+  /* レシートレビュー行 */
+  .receipt-row {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: var(--transition);
+    position: relative;
+  }
+  .receipt-row:hover {
+    border-color: var(--border-hover);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .receipt-row.added {
+    border-color: rgba(74, 222, 128, 0.3);
+    background: rgba(34, 197, 94, 0.03);
+    opacity: 0.6;
+  }
+  .success-checkmark {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    font-size: 1.5rem;
+    color: var(--green-400);
+    animation: scaleUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+  }
+
+  @keyframes scaleUp {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>📷 食材登録</h1>
+  <p>カメラでの撮影または画像アップロードにより、AIが食材を自動判別して登録できます</p>
+</div>
+
+<!-- モード切替タブ -->
+<div class="scan-tabs">
+  <button class="scan-tab active" id="tabSingle" onclick="switchMode('single')">
+    📸 1品ずつ登録
+  </button>
+  <button class="scan-tab" id="tabReceipt" onclick="switchMode('receipt')">
+    🧾 レシート一括登録 <span class="estimate-badge" style="background:var(--green-500);color:#fff">Gemini AI</span>
+  </button>
+</div>
+
+<div class="grid-scan section">
+
+  <!-- カメラ・画像アップロード側 -->
+  <div>
+    <div class="section-title" id="scanLeftTitle">食材のカメラ撮影</div>
+
+    <!-- カメラビュー -->
+    <div class="camera-container" id="cameraBox">
+      <video id="videoEl" autoplay playsinline style="display:block"></video>
+      <canvas id="canvasEl" style="display:none"></canvas>
+      <img id="capturedImg" alt="撮影画像" style="display:none">
+      <div class="camera-overlay">
+        <div class="camera-corner tl"></div>
+        <div class="camera-corner tr"></div>
+        <div class="camera-corner bl"></div>
+        <div class="camera-corner br"></div>
+      </div>
+      <div class="loading-overlay" id="scanningOverlay" style="display:none">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loadingOverlayText">OCR 解析中...</div>
+      </div>
+    </div>
+
+    <!-- カメラエラー -->
+    <div id="cameraError" class="alert alert-danger" style="display:none;margin-top:12px"></div>
+
+    <!-- OCR メッセージ -->
+    <div id="ocrMsg" style="display:none;margin-top:10px"></div>
+
+    <!-- アクションボタン -->
+    <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+      <div style="display:flex;gap:10px;width:100%">
+        <button class="btn btn-primary btn-full" id="captureBtn" onclick="captureAndScan()">📸 撮影して読み取る</button>
+        <button class="btn btn-secondary"        id="retakeBtn"  onclick="retake()" style="display:none">🔄 再撮影</button>
+      </div>
+      
+      <!-- ファイルアップロード用（カメラがないデスクトップ用） -->
+      <input type="file" id="fileInput" accept="image/*" style="display:none" onchange="handleFileUpload(event)">
+      <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()" style="width:100%">
+        📁 画像ファイルをアップロードして解析
+      </button>
+    </div>
+  </div>
+
+  <!-- 右側フォーム / レシート一括確認画面 -->
+  <div>
+    
+    <!-- モード1: 1品ずつ登録用の手動フォーム -->
+    <div id="singleFormContainer">
+      <div class="section-title">食材情報の入力</div>
+      <div class="card">
+        <form id="addForm" onsubmit="handleSubmit(event)">
+
+          <div class="form-group">
+            <label class="form-label" for="itemName">食材名 *</label>
+            <input class="form-control" id="itemName" type="text" placeholder="例: 牛乳" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="expiryDate">賞味期限</label>
+            <input class="form-control" id="expiryDate" type="date">
+            <button class="btn btn-secondary" type="button" id="estimateBtn" onclick="runEstimate()">
+              📅 期限を自動推定
+            </button>
+            <div id="estimateResult" style="display:none"></div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div class="form-group">
+              <label class="form-label" for="quantity">数量</label>
+              <input class="form-control" id="quantity" type="number" value="1" min="0.1" step="0.1">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="unit">単位</label>
+              <select class="form-control" id="unit">
+                <option value="個">個</option>
+                <option value="本">本</option>
+                <option value="袋">袋</option>
+                <option value="g">g</option>
+                <option value="kg">kg</option>
+                <option value="ml">ml</option>
+                <option value="L">L</option>
+                <option value="丁">丁</option>
+                <option value="玉">玉</option>
+                <option value="枚">枚</option>
+                <option value="缶">缶</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="category">カテゴリ</label>
+            <select class="form-control" id="category">
+              <option value="meat">🥩 肉類</option>
+              <option value="fish">🐟 魚介</option>
+              <option value="vegetable">🥦 野菜</option>
+              <option value="fruit">🍎 果物</option>
+              <option value="dairy">🥛 乳製品</option>
+              <option value="beverage">🧃 飲み物</option>
+              <option value="snack">🍪 スナック</option>
+              <option value="grain">🌾 穀物</option>
+              <option value="condiment">🧂 調味料</option>
+              <option value="other">📦 その他</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="storageType">保存場所</label>
+            <select class="form-control" id="storageType">
+              <option value="fridge">❄️ 冷蔵</option>
+              <option value="freezer">🧊 冷凍</option>
+              <option value="room">🏠 常温</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="notes">メモ</label>
+            <input class="form-control" id="notes" type="text" placeholder="任意">
+          </div>
+
+          <div id="successMsg" class="alert alert-success" style="display:none"></div>
+
+          <button class="btn btn-primary btn-full" type="submit" id="submitBtn">
+            ＋ 在庫に追加
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- モード2: レシート一括確認用のコンテナ -->
+    <div id="receiptReviewContainer" style="display:none">
+      <div class="section-title">レシート解析結果（確認・修正）</div>
+      <div class="card" style="padding:16px;">
+        
+        <!-- 初期・未解析ステート -->
+        <div id="receiptEmptyState" class="empty-state" style="padding:32px 16px;">
+          <div class="empty-icon">📄</div>
+          <p>レシートを撮影するか、画像ファイルをアップロードしてください。<br>Gemini AIが自動で食材を抽出します。</p>
+        </div>
+
+        <!-- 読み取り結果リスト -->
+        <div id="receiptItemsList" style="display:none; max-height:480px; overflow-y:auto; margin-bottom:20px; display:flex; flex-direction:column; gap:12px; padding-right:4px;">
+          <!-- JSで動的に追加されます -->
+        </div>
+
+        <!-- 一括アクション -->
+        <div id="receiptActions" style="display:none">
+          <div id="bulkSuccessMsg" class="alert alert-success" style="display:none; margin-bottom:12px"></div>
+          <button class="btn btn-primary btn-full pulse-glow" onclick="bulkRegisterItems()" id="bulkAddBtn">
+            📥 選択した食材を一括登録
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+</div><!-- /grid -->
+
+<!-- Tesseract.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="/static/js/shelflife.js"></script>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentMode = 'single'; // 'single' または 'receipt'
+let receiptItems = [];      // レシートから抽出されたアイテム配列
+
+// ── モード切替 ───────────────────────────────────────
+function switchMode(mode) {
+  currentMode = mode;
+  document.getElementById('tabSingle').classList.toggle('active', mode === 'single');
+  document.getElementById('tabReceipt').classList.toggle('active', mode === 'receipt');
+
+  const scanLeftTitle = document.getElementById('scanLeftTitle');
+  const captureBtn = document.getElementById('captureBtn');
+  
+  if (mode === 'single') {
+    scanLeftTitle.textContent = '食材のカメラ撮影';
+    captureBtn.textContent = '📸 撮影して読み取る';
+    document.getElementById('singleFormContainer').style.display = 'block';
+    document.getElementById('receiptReviewContainer').style.display = 'none';
+  } else {
+    scanLeftTitle.textContent = 'レシートのカメラ撮影';
+    captureBtn.textContent = '📸 レシートを撮影して解析';
+    document.getElementById('singleFormContainer').style.display = 'none';
+    document.getElementById('receiptReviewContainer').style.display = 'block';
+  }
+
+  // 画面状態をリセット
+  retake();
+}
+
+// ── 期限自動推定 ───────────────────────────────────────
+async function runEstimate() {
+  const foodName   = document.getElementById('itemName').value.trim();
+  const storageType= document.getElementById('storageType').value;
+  const resultEl   = document.getElementById('estimateResult');
+  const btn        = document.getElementById('estimateBtn');
+
+  if (!foodName) {
+    showEstimateResult('warn', '⚠️ まず食材名を入力してください', null);
+    return;
+  }
+
+  btn.textContent = '⏳ 推定中...';
+  btn.classList.add('loading');
+  resultEl.style.display = 'none';
+
+  const settings = getSettings();
+
+  // ── ① ローカルDBで検索 ────────────────────────────
+  const local = estimateExpiryDate(foodName, storageType, settings);
+
+  if (local && local.error) {
+    showEstimateResult('warn', `⚠️ ${local.error}`, null);
+    btn.textContent = '📅 期限を自動推定';
+    btn.classList.remove('loading');
+    return;
+  }
+
+  if (local && local.date) {
+    document.getElementById('expiryDate').value = local.date;
+    const tempInfo = local.actualTemp !== undefined ? `（現在${local.actualTemp}°C補正済み）` : '';
+    showEstimateResult('db',
+      `📦 データベース　約 <strong>${local.days}日</strong>${tempInfo} → ${local.date}`,
+      'データベース');
+    btn.textContent = '📅 期限を自動推定';
+    btn.classList.remove('loading');
+    return;
+  }
+
+  // ── ② DBになければ Gemini AI に聞く ──────────────
+  try {
+    const actualTemp = storageType === 'fridge'
+      ? (settings.fridgeTemp ?? 4)
+      : storageType === 'freezer' ? -18
+      : (settings.regionTemp ?? 22);
+
+    const res  = await fetch('/api/estimate-shelf-life', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ foodName, storageType, actualTemp })
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || '推定失敗');
+
+    document.getElementById('expiryDate').value = data.date;
+    const note = data.note ? `（${data.note}）` : '';
+    showEstimateResult('ai',
+      `🤖 AI推定　約 <strong>${data.days}日</strong>${note} → ${data.date}`,
+      'AI推定');
+
+  } catch (e) {
+    showEstimateResult('warn', `⚠️ 推定できませんでした：${e.message}`, null);
+  } finally {
+    btn.textContent = '📅 期限を自動推定';
+    btn.classList.remove('loading');
+  }
+}
+
+function showEstimateResult(type, html, badgeLabel) {
+  const el = document.getElementById('estimateResult');
+  const badge = badgeLabel
+    ? `<span class="estimate-badge">${badgeLabel}</span>`
+    : '';
+  el.className = `estimate-result ${type === 'ai' ? 'ai' : type === 'warn' ? 'warn' : ''}`;
+  el.innerHTML = `${badge}<span>${html}</span>`;
+  el.style.display = 'flex';
+}
+
+// ── カメラ制御 ────────────────────────────────────────
+let stream = null;
+
+async function startCamera() {
+  const videoEl    = document.getElementById('videoEl');
+  const cameraError = document.getElementById('cameraError');
+  cameraError.style.display = 'none';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    videoEl.srcObject = stream;
+    videoEl.style.display = 'block';
+    document.getElementById('capturedImg').style.display = 'none';
+    document.getElementById('captureBtn').style.display = '';
+    document.getElementById('retakeBtn').style.display  = 'none';
+  } catch (e) {
+    cameraError.style.display = 'block';
+    cameraError.textContent   = 'カメラのアクセスを許可してください。（ブラウザの設定を確認するか、画像アップロード機能をご利用ください）';
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+}
+
+// ── 撮影 ──────────────────────────────────────────────
+async function captureAndScan() {
+  const videoEl  = document.getElementById('videoEl');
+  const canvasEl = document.getElementById('canvasEl');
+  const ctx      = canvasEl.getContext('2d');
+
+  canvasEl.width  = videoEl.videoWidth  || 640;
+  canvasEl.height = videoEl.videoHeight || 480;
+  ctx.drawImage(videoEl, 0, 0);
+
+  const dataUrl = canvasEl.toDataURL('image/png');
+  stopCamera();
+
+  // 撮影画像を表示
+  const img = document.getElementById('capturedImg');
+  img.src = dataUrl;
+  img.style.display = 'block';
+  videoEl.style.display = 'none';
+  document.getElementById('captureBtn').style.display = 'none';
+  document.getElementById('retakeBtn').style.display  = '';
+
+  // 解析開始
+  processImageAnalysis(dataUrl);
+}
+
+// ── ファイルアップロード時のハンドラ ────────────────────
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const dataUrl = e.target.result;
+    stopCamera();
+
+    // アップロードされた画像を表示
+    const img = document.getElementById('capturedImg');
+    img.src = dataUrl;
+    img.style.display = 'block';
+    document.getElementById('videoEl').style.display = 'none';
+    document.getElementById('captureBtn').style.display = 'none';
+    document.getElementById('retakeBtn').style.display  = '';
+
+    // 解析開始
+    processImageAnalysis(dataUrl);
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── 画像解析の共通ハブ ─────────────────────────────────
+function processImageAnalysis(dataUrl) {
+  if (currentMode === 'single') {
+    runTesseractOCR(dataUrl);
+  } else {
+    runGeminiReceiptScan(dataUrl);
+  }
+}
+
+// ── ① シングル用 OCR (Tesseract.js) ─────────────────────
+async function runTesseractOCR(dataUrl) {
+  document.getElementById('loadingOverlayText').textContent = 'OCR 解析中...';
+  document.getElementById('scanningOverlay').style.display = 'flex';
+  const ocrMsg = document.getElementById('ocrMsg');
+  ocrMsg.style.display = 'none';
+
+  try {
+    const result = await Tesseract.recognize(dataUrl, 'jpn+eng');
+    const text   = result.data.text;
+    console.log('OCR Text:', text);
+    parseOCR(text);
+    ocrMsg.className = 'alert alert-info';
+    ocrMsg.textContent = '✅ 読み取り完了。内容を確認して「在庫に追加」を押してください。';
+    ocrMsg.style.display = 'block';
+  } catch (e) {
+    ocrMsg.className = 'alert alert-warning';
+    ocrMsg.textContent = '⚠️ 読み取りに失敗しました。手動で入力してください。';
+    ocrMsg.style.display = 'block';
+  } finally {
+    document.getElementById('scanningOverlay').style.display = 'none';
+  }
+}
+
+function parseOCR(text) {
+  // 日付パターン: YYYY/MM/DD, YYYY-MM-DD など
+  const dateMatch = text.match(/(\d{2,4})[\/\-\.年](\d{1,2})[\/\-\.月](\d{1,2})日?/);
+  if (dateMatch) {
+    let y = dateMatch[1], m = dateMatch[2].padStart(2,'0'), d = dateMatch[3].padStart(2,'0');
+    if (y.length === 2) y = '20' + y;
+    const candidate = `${y}-${m}-${d}`;
+    if (!isNaN(new Date(candidate).getTime())) {
+      document.getElementById('expiryDate').value = candidate;
+    }
+  }
+  // 食材名：日付を含まない最初の行
+  const nameInput = document.getElementById('itemName');
+  if (!nameInput.value) {
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1 && !/\d{4}/.test(l) && !/exp/i.test(l));
+    if (lines.length > 0) nameInput.value = lines[0];
+  }
+}
+
+// ── ② レシート用一括スキャナー (Gemini Vision API) ──────────
+async function runGeminiReceiptScan(dataUrl) {
+  document.getElementById('loadingOverlayText').textContent = 'Gemini AI がレシートを分析中...';
+  document.getElementById('scanningOverlay').style.display = 'flex';
+  
+  const ocrMsg = document.getElementById('ocrMsg');
+  ocrMsg.style.display = 'none';
+
+  const emptyState = document.getElementById('receiptEmptyState');
+  const itemsList = document.getElementById('receiptItemsList');
+  const actions = document.getElementById('receiptActions');
+
+  emptyState.style.display = 'block';
+  itemsList.style.display = 'none';
+  actions.style.display = 'none';
+
+  try {
+    const response = await fetch('/api/scan-receipt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ image: dataUrl })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) throw new Error(data.error || 'レシート解析エラー');
+
+    receiptItems = data;
+    renderReceiptReviewList();
+    
+    ocrMsg.className = 'alert alert-info';
+    ocrMsg.textContent = `✅ レシートから ${receiptItems.length} 個の食材を検出しました！内容を確認して登録してください。`;
+    ocrMsg.style.display = 'block';
+  } catch (e) {
+    ocrMsg.className = 'alert alert-warning';
+    ocrMsg.textContent = `❌ 解析エラー: ${e.message}`;
+    ocrMsg.style.display = 'block';
+  } finally {
+    document.getElementById('scanningOverlay').style.display = 'none';
+  }
+}
+
+// レシート抽出アイテムをレビューリストに表示
+function renderReceiptReviewList() {
+  const emptyState = document.getElementById('receiptEmptyState');
+  const itemsList = document.getElementById('receiptItemsList');
+  const actions = document.getElementById('receiptActions');
+
+  if (!receiptItems || receiptItems.length === 0) {
+    emptyState.style.display = 'block';
+    itemsList.style.display = 'none';
+    actions.style.display = 'none';
+    return;
+  }
+
+  emptyState.style.display = 'none';
+  itemsList.style.display = 'flex';
+  actions.style.display = 'block';
+
+  itemsList.innerHTML = receiptItems.map((item, index) => {
+    return `
+      <div class="receipt-row" id="receipt-row-${index}">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <input type="checkbox" checked class="receipt-item-checkbox" data-index="${index}" style="width:20px; height:20px; accent-color:var(--green-400); cursor:pointer;">
+          <div style="flex:1; display:flex; flex-direction:column; gap:8px; min-width:0;">
+            <!-- 食材名 -->
+            <input type="text" class="form-control item-name-input" value="${item.name || ''}" placeholder="食材名" style="padding:6px 10px; font-size:0.9rem; font-weight:600;" data-index="${index}">
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <!-- カテゴリ -->
+              <select class="form-control item-category-select" style="padding:4px 8px; font-size:0.8rem; height:32px; cursor:pointer;" data-index="${index}">
+                <option value="meat" ${item.category === 'meat' ? 'selected' : ''}>🥩 肉類</option>
+                <option value="fish" ${item.category === 'fish' ? 'selected' : ''}>🐟 魚介</option>
+                <option value="vegetable" ${item.category === 'vegetable' ? 'selected' : ''}>🥦 野菜</option>
+                <option value="fruit" ${item.category === 'fruit' ? 'selected' : ''}>🍎 果物</option>
+                <option value="dairy" ${item.category === 'dairy' ? 'selected' : ''}>🥛 乳製品</option>
+                <option value="beverage" ${item.category === 'beverage' ? 'selected' : ''}>🧃 飲み物</option>
+                <option value="snack" ${item.category === 'snack' ? 'selected' : ''}>🍪 スナック</option>
+                <option value="grain" ${item.category === 'grain' ? 'selected' : ''}>🌾 穀物</option>
+                <option value="condiment" ${item.category === 'condiment' ? 'selected' : ''}>🧂 調味料</option>
+                <option value="other" ${item.category === 'other' || !item.category ? 'selected' : ''}>📦 その他</option>
+              </select>
+              <!-- 保存方法 -->
+              <select class="form-control item-storage-select" style="padding:4px 8px; font-size:0.8rem; height:32px; cursor:pointer;" data-index="${index}">
+                <option value="fridge" ${item.storageType === 'fridge' ? 'selected' : ''}>❄️ 冷蔵</option>
+                <option value="freezer" ${item.storageType === 'freezer' ? 'selected' : ''}>🧊 冷凍</option>
+                <option value="room" ${item.storageType === 'room' ? 'selected' : ''}>🏠 常温</option>
+              </select>
+            </div>
+
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:4px;">
+              <!-- 数量コントロール -->
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button type="button" class="btn btn-secondary" onclick="adjustReceiptQty(${index}, -1)" style="padding:0; width:26px; height:26px; font-size:0.9rem; line-height:1;">-</button>
+                <input type="number" class="form-control item-qty-input" value="${item.quantity || 1}" min="0.1" step="0.1" style="width:55px; text-align:center; padding:2px; font-size:0.85rem; height:26px;" data-index="${index}" id="qty-${index}">
+                <button type="button" class="btn btn-secondary" onclick="adjustReceiptQty(${index}, 1)" style="padding:0; width:26px; height:26px; font-size:0.9rem; line-height:1;">+</button>
+              </div>
+
+              <!-- 単位 -->
+              <select class="form-control item-unit-select" style="width:65px; padding:2px 6px; font-size:0.85rem; height:26px; cursor:pointer;" data-index="${index}">
+                <option value="個" ${item.unit === '個' ? 'selected' : ''}>個</option>
+                <option value="本" ${item.unit === '本' ? 'selected' : ''}>本</option>
+                <option value="袋" ${item.unit === '袋' ? 'selected' : ''}>袋</option>
+                <option value="g" ${item.unit === 'g' ? 'selected' : ''}>g</option>
+                <option value="kg" ${item.unit === 'kg' ? 'selected' : ''}>kg</option>
+                <option value="ml" ${item.unit === 'ml' ? 'selected' : ''}>ml</option>
+                <option value="L" ${item.unit === 'L' ? 'selected' : ''}>L</option>
+                <option value="丁" ${item.unit === '丁' ? 'selected' : ''}>丁</option>
+                <option value="玉" ${item.unit === '玉' ? 'selected' : ''}>玉</option>
+                <option value="枚" ${item.unit === '枚' ? 'selected' : ''}>枚</option>
+                <option value="缶" ${item.unit === '缶' ? 'selected' : ''}>缶</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// 数量調整ヘルパー
+function adjustReceiptQty(index, change) {
+  const input = document.getElementById(`qty-${index}`);
+  if (!input) return;
+  let val = parseFloat(input.value) || 1;
+  val = Math.max(0.1, val + change);
+  input.value = val;
+}
+
+// 一括登録処理
+async function bulkRegisterItems() {
+  const bulkAddBtn = document.getElementById('bulkAddBtn');
+  const bulkSuccessMsg = document.getElementById('bulkSuccessMsg');
+  const checkboxes = document.querySelectorAll('.receipt-item-checkbox');
+  
+  let checkedItemsCount = 0;
+  let registeredCount = 0;
+
+  bulkAddBtn.disabled = true;
+  bulkAddBtn.textContent = '⏳ 食材を登録中...';
+  
+  const settings = getSettings();
+
+  for (let box of checkboxes) {
+    if (!box.checked) continue;
+    checkedItemsCount++;
+
+    const index = parseInt(box.dataset.index);
+    const rowEl = document.getElementById(`receipt-row-${index}`);
+    
+    // UIの値を取得
+    const name = rowEl.querySelector('.item-name-input').value.trim();
+    const category = rowEl.querySelector('.item-category-select').value;
+    const storageType = rowEl.querySelector('.item-storage-select').value;
+    const quantity = parseFloat(rowEl.querySelector('.item-qty-input').value) || 1;
+    const unit = rowEl.querySelector('.item-unit-select').value;
+
+    if (!name) continue;
+
+    // 賞味期限を動的推定 (ローカルDB参照)
+    const localEst = estimateExpiryDate(name, storageType, settings);
+    let expiryDate = '';
+    
+    if (localEst && localEst.date) {
+      expiryDate = localEst.date;
+    } else {
+      // 推定できない場合はデフォルト保存期限
+      const limitDaysMap = {
+        meat: 3,
+        fish: 2,
+        vegetable: 7,
+        fruit: 10,
+        dairy: 7,
+        beverage: 14,
+        snack: 30,
+        grain: 60,
+        condiment: 90,
+        other: 5
+      };
+      const limitDays = limitDaysMap[category] || 5;
+      const d = new Date();
+      d.setDate(d.getDate() + limitDays);
+      expiryDate = d.toISOString().split('T')[0];
+    }
+
+    const item = {
+      name,
+      category,
+      storageType,
+      quantity,
+      unit,
+      expiryDate,
+      notes: 'レシート一括スキャン'
+    };
+
+    // 同期/非同期通信でアイテムを追加
+    const addedItem = addItem(item);
+    if (addedItem) {
+      registeredCount++;
+      // 登録完了アニメーション
+      rowEl.classList.add('added');
+      box.checked = false;
+      box.disabled = true;
+      
+      const checkmark = document.createElement('div');
+      checkmark.className = 'success-checkmark';
+      checkmark.innerHTML = '✔';
+      rowEl.appendChild(checkmark);
+    }
+  }
+
+  if (registeredCount > 0) {
+    bulkSuccessMsg.textContent = `✅ ${registeredCount} 個の食材を冷蔵庫（データベース）に一括登録しました！`;
+    bulkSuccessMsg.style.display = 'block';
+    
+    setTimeout(() => {
+      bulkSuccessMsg.style.display = 'none';
+      bulkAddBtn.disabled = false;
+      bulkAddBtn.textContent = '📥 選択した食材を一括登録';
+      // リストと再撮影状態をリセット
+      retake();
+      // 在庫レビューをクリア
+      receiptItems = [];
+      renderReceiptReviewList();
+    }, 3000);
+  } else {
+    bulkAddBtn.disabled = false;
+    bulkAddBtn.textContent = '📥 選択した食材を一括登録';
+  }
+}
+
+
+function retake() {
+  document.getElementById('ocrMsg').style.display = 'none';
+  document.getElementById('fileInput').value = '';
+  startCamera();
+}
+
+// ── 1品登録用のフォーム送信 ─────────────────────────────
+function handleSubmit(e) {
+  e.preventDefault();
+  const item = {
+    name:        document.getElementById('itemName').value.trim(),
+    expiryDate:  document.getElementById('expiryDate').value,
+    quantity:    parseFloat(document.getElementById('quantity').value) || 1,
+    unit:        document.getElementById('unit').value,
+    category:    document.getElementById('category').value,
+    storageType: document.getElementById('storageType').value,
+    notes:       document.getElementById('notes').value.trim()
+  };
+  addItem(item);
+
+  const msg = document.getElementById('successMsg');
+  msg.textContent = `✅「${item.name}」を在庫に追加しました！`;
+  msg.style.display = 'block';
+
+  // フォームをリセット
+  setTimeout(() => {
+    document.getElementById('addForm').reset();
+    document.getElementById('estimateResult').style.display = 'none';
+    msg.style.display = 'none';
+    document.getElementById('ocrMsg').style.display = 'none';
+    retake();
+  }, 2500);
+}
+
+// 起動時にカメラ開始
+startCamera();
+
+// ページ離脱時にカメラを止める
+window.addEventListener('beforeunload', stopCamera);
+</script>
+{% endblock %}

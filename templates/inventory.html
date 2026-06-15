@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}在庫一覧{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>📋 在庫一覧</h1>
+    <p>登録されているすべての食材</p>
+  </div>
+  <a href="/scan" class="btn btn-primary">＋ 食材を追加</a>
+</div>
+
+<!-- フィルター -->
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px">
+  <button class="btn btn-secondary filter-btn active" data-filter="all"     onclick="setFilter('all')">すべて</button>
+  <button class="btn btn-secondary filter-btn"        data-filter="danger"  onclick="setFilter('danger')" style="color:var(--red-400)">🚨 危険</button>
+  <button class="btn btn-secondary filter-btn"        data-filter="warning" onclick="setFilter('warning')" style="color:var(--yellow-400)">⚠️ 注意</button>
+  <button class="btn btn-secondary filter-btn"        data-filter="fresh"   onclick="setFilter('fresh')" style="color:var(--green-400)">✅ 良好</button>
+</div>
+
+<!-- 在庫リスト -->
+<div class="item-list" id="inventoryList">
+  <div class="empty-state"><div class="empty-icon">⏳</div><p>読み込み中...</p></div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentFilter = 'all';
+
+document.addEventListener('DOMContentLoaded', () => renderList());
+
+function renderList() {
+  const settings = getSettings();
+  const items    = processInventory(getInventory(), settings);
+
+  const filtered = currentFilter === 'all'
+    ? items
+    : items.filter(i => i.status === currentFilter);
+
+  // ソート：danger → warning → fresh
+  const order = { danger: 0, warning: 1, fresh: 2, consumed: 3 };
+  filtered.sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+
+  const el = document.getElementById('inventoryList');
+  if (filtered.length === 0) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><p>該当する食材がありません</p></div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(item => {
+    const badgeClass = { fresh:'badge-fresh', warning:'badge-warning', danger:'badge-danger' }[item.status] || 'badge-info';
+    const days       = item.displayDaysLeft;
+    const daysText   = days < 0 ? `${Math.abs(days)}日超過` : days === 0 ? '今日まで' : `残り${days}日`;
+    const cat        = CATEGORY_LABELS[item.category] || item.category;
+    const storage    = STORAGE_LABELS[item.storageType] || item.storageType;
+    const estimatedPrice = Math.round(item.price || 0);
+
+    return `
+      <div class="item-row" id="row-${item.id}" style="transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);">
+        <div class="item-info">
+          <div class="item-name">${item.name}</div>
+          <div class="item-meta">
+            ${cat} ・ ${storage} ・ ${item.quantity}${item.unit} ・ <span style="color:var(--green-400);font-weight:600;">¥${estimatedPrice}</span>
+            ${item.notes ? ' ・ ' + item.notes : ''}
+          </div>
+          <div style="margin-top:4px;font-size:0.75rem;color:var(--text-muted)">
+            期限: ${item.expiryDate} ／ 登録: ${item.registeredAt.split('T')[0]}
+          </div>
+        </div>
+        <div class="item-actions" style="display:flex; gap:8px; align-items:center;">
+          <span class="badge ${badgeClass}">${daysText}</span>
+          
+          <button class="btn btn-consume-quick" style="padding:6px 12px; font-size:0.85rem; font-weight:600; border-radius:8px; background:rgba(34,197,94,0.12); border:1px solid rgba(74,222,128,0.25); color:var(--green-400); cursor:pointer; transition:all 0.2s;"
+                  onclick="consumeItem('${item.id}')" title="美味しく食べ切りました！🍳">🍳 食べた！</button>
+                  
+          <button class="btn btn-discard-quick" style="padding:6px 12px; font-size:0.85rem; font-weight:600; border-radius:8px; background:rgba(239,68,68,0.12); border:1px solid rgba(248,113,113,0.25); color:var(--red-400); cursor:pointer; transition:all 0.2s;"
+                  onclick="discardItem('${item.id}')" title="廃棄せざるを得ませんでした…🗑">🗑 廃棄</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function setFilter(f) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.filter === f);
+  });
+  renderList();
+}
+
+// フィルターボタンとクイックアクションボタンのスタイル
+const style = document.createElement('style');
+style.textContent = `
+  .filter-btn.active{background:var(--green-glow);border-color:rgba(74,222,128,0.3);color:var(--green-400);}
+  .btn-consume-quick:hover { background: rgba(34,197,94,0.25) !important; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(34,197,94,0.15); }
+  .btn-discard-quick:hover { background: rgba(239,68,68,0.25) !important; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(239,68,68,0.15); }
+  .btn-consume-quick:active, .btn-discard-quick:active { transform: translateY(0); }
+`;
+document.head.appendChild(style);
+
+function consumeItem(id) {
+  const row = document.getElementById(`row-${id}`);
+  if (!row) return;
+
+  // 滑らかな右スライド＆フェードアウトアニメーション
+  row.style.opacity = '0';
+  row.style.transform = 'translateX(50px) scale(0.95)';
+  row.style.pointerEvents = 'none';
+
+  fetch(`/api/inventory/${id}/consume`, { method: 'POST' })
+    .then(res => {
+      if (!res.ok) throw new Error("API error");
+      setTimeout(() => {
+        row.remove();
+        // 表示件数が0になったら再レンダリングして空状態を表示
+        const items = document.querySelectorAll('.item-row');
+        if (items.length === 0) renderList();
+      }, 400);
+    })
+    .catch(err => {
+      console.error("Error consuming item:", err);
+      row.style.opacity = '1';
+      row.style.transform = 'none';
+      row.style.pointerEvents = 'all';
+    });
+}
+
+function discardItem(id) {
+  const row = document.getElementById(`row-${id}`);
+  if (!row) return;
+
+  // 滑らかな左スライド＆フェードアウトアニメーション
+  row.style.opacity = '0';
+  row.style.transform = 'translateX(-50px) scale(0.95)';
+  row.style.pointerEvents = 'none';
+
+  fetch(`/api/inventory/${id}/discard`, { method: 'POST' })
+    .then(res => {
+      if (!res.ok) throw new Error("API error");
+      setTimeout(() => {
+        row.remove();
+        const items = document.querySelectorAll('.item-row');
+        if (items.length === 0) renderList();
+      }, 400);
+    })
+    .catch(err => {
+      console.error("Error discarding item:", err);
+      row.style.opacity = '1';
+      row.style.transform = 'none';
+      row.style.pointerEvents = 'all';
+    });
+}
+</script>
+{% endblock %}

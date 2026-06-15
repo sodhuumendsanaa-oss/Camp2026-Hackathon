@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}FreshGuard{% endblock %} - 食品品質管理</title>
+  <meta name="description" content="温度を考慮した賢い食材管理で、食品ロスをゼロへ">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    @media (max-width: 576px) {
+      .logout-label { display: none; }
+    }
+  </style>
+  {% block extra_css %}{% endblock %}
+</head>
+<body>
+<div class="app-wrapper">
+
+  <!-- ヘッダー -->
+  <header class="header">
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <span class="logo-icon">🥗</span>
+        <span class="logo-text">FreshGuard</span>
+      </a>
+      <div class="header-right" style="display:flex; align-items:center; gap:12px;">
+        <div class="weather-badge" id="weatherBadge" title="現在の気温">
+          <span>🌡️</span>
+          <span id="weatherTemp">取得中…</span>
+        </div>
+        <a href="/logout" class="btn btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; border-radius: 20px; display: inline-flex; align-items: center; gap: 6px; height: 32px;" title="ログアウト">
+          <span>🚪</span><span class="logout-label" style="font-weight:600;">ログアウト</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- サイドバー（デスクトップ） -->
+    <nav class="sidebar">
+      <div class="nav-items">
+        <div style="padding: 12px 14px; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); display:flex; align-items:center; gap:10px;">
+          <span style="font-size:1.2rem;">👤</span>
+          <div style="min-width:0;">
+            <div style="font-size:0.75rem; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">ログイン中</div>
+            <div style="font-size:0.9rem; font-weight:600; color:var(--text-primary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">{{ session['username'] }}</div>
+          </div>
+        </div>
+        <a href="/"          class="nav-item {% if request.path == '/'          %}active{% endif %}"><span class="nav-icon">📊</span><span class="nav-label">ダッシュボード</span></a>
+        <a href="/inventory" class="nav-item {% if request.path == '/inventory' %}active{% endif %}"><span class="nav-icon">📋</span><span class="nav-label">在庫一覧</span></a>
+        <a href="/scan"      class="nav-item {% if request.path == '/scan'      %}active{% endif %}"><span class="nav-icon">📷</span><span class="nav-label">食材登録</span></a>
+        <a href="/recipes"   class="nav-item {% if request.path == '/recipes'   %}active{% endif %}"><span class="nav-icon">🍳</span><span class="nav-label">AIレシピ</span></a>
+        <a href="/settings"  class="nav-item {% if request.path == '/settings'  %}active{% endif %}"><span class="nav-icon">⚙️</span><span class="nav-label">設定</span></a>
+      </div>
+      <div style="padding: 16px;">
+        <a href="/logout" class="btn btn-danger btn-full" style="padding:8px 12px; font-size:0.85rem; border-radius:8px; display:flex;">
+          🚪 ログアウト
+        </a>
+      </div>
+    </nav>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content fade-in">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <!-- ボトムナビ（モバイル） -->
+  <nav class="bottom-nav">
+    <a href="/"          class="bottom-nav-item {% if request.path == '/'          %}active{% endif %}"><span class="nav-icon">📊</span><span>ホーム</span></a>
+    <a href="/inventory" class="bottom-nav-item {% if request.path == '/inventory' %}active{% endif %}"><span class="nav-icon">📋</span><span>在庫</span></a>
+    <a href="/scan"      class="bottom-nav-item {% if request.path == '/scan'      %}active{% endif %}"><span class="nav-icon">📷</span><span>登録</span></a>
+    <a href="/recipes"   class="bottom-nav-item {% if request.path == '/recipes'   %}active{% endif %}"><span class="nav-icon">🍳</span><span>レシピ</span></a>
+    <a href="/settings"  class="bottom-nav-item {% if request.path == '/settings'  %}active{% endif %}"><span class="nav-icon">⚙️</span><span>設定</span></a>
+  </nav>
+
+</div>
+
+<!-- 共通 JS -->
+<script src="/static/js/data.js"></script>
+<script src="/static/js/calculations.js"></script>
+<script>
+  // 気温を取得してヘッダーに表示
+  (async function loadWeather() {
+    const settings = getSettings();
+    try {
+      const res  = await fetch(`/api/weather?lat=${settings.lat}&lon=${settings.lon}`);
+      const data = await res.json();
+      if (data.temperature !== undefined) {
+        document.getElementById('weatherTemp').textContent = `${data.temperature}°C`;
+        // 取得した気温を設定に保存（計算に使用）
+        const s = getSettings();
+        s.regionTemp = data.temperature;
+        saveSettings(s);
+      } else {
+        document.getElementById('weatherTemp').textContent = `${settings.regionTemp ?? '--'}°C`;
+      }
+    } catch {
+      document.getElementById('weatherTemp').textContent = `${settings.regionTemp ?? '--'}°C`;
+    }
+  })();
+</script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}設定{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>⚙️ 設定</h1>
+  <p>温度・場所の設定とデータ管理</p>
+</div>
+
+<!-- 温度設定 -->
+<div class="card section">
+  <div class="section-title">🌡️ 温度設定</div>
+
+  <div class="form-group">
+    <label class="form-label" for="fridgeTemp">冷蔵庫の設定温度 (°C)</label>
+    <input class="form-control" id="fridgeTemp" type="number" min="-5" max="20" step="0.5" placeholder="例: 4">
+    <p style="color:var(--text-muted);font-size:0.78rem;margin-top:5px">一般的な冷蔵庫は 2〜6°C です。この温度で劣化速度を計算します。</p>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="regionTemp">手動：外気温 (°C)</label>
+    <input class="form-control" id="regionTemp" type="number" min="-30" max="50" step="0.5" placeholder="例: 25">
+    <p style="color:var(--text-muted);font-size:0.78rem;margin-top:5px">Open-Meteo で自動取得されます。手動で上書きも可能です。</p>
+  </div>
+</div>
+
+<!-- 場所設定 -->
+<div class="card section">
+  <div class="section-title">📍 場所の設定</div>
+  <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px">
+    Open-Meteo で気温を自動取得します。緯度・経度を入力するか、
+    下のボタンで現在地を取得できます。
+  </p>
+
+  <div class="form-group">
+    <label class="form-label" for="location">地名（表示用）</label>
+    <input class="form-control" id="location" type="text" placeholder="例: 東京都">
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div class="form-group">
+      <label class="form-label" for="lat">緯度</label>
+      <input class="form-control" id="lat" type="number" step="0.0001" placeholder="例: 35.6762">
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="lon">経度</label>
+      <input class="form-control" id="lon" type="number" step="0.0001" placeholder="例: 139.6503">
+    </div>
+  </div>
+
+  <button class="btn btn-secondary" onclick="getLocation()" id="gpsBtn">
+    📍 現在地を自動取得
+  </button>
+  <div id="gpsMsg" style="display:none;margin-top:10px;font-size:0.85rem;color:var(--green-400)"></div>
+</div>
+
+<!-- LINE Bot連携 -->
+<div class="card section">
+  <div class="section-title">💬 LINE Bot連携</div>
+  <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px">
+    賞味期限が近づいた食材の通知をスマホで受け取ることができます。
+  </p>
+
+  <div style="background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.18);border-radius:8px;padding:14px;margin-bottom:16px">
+    <h4 style="font-size:0.85rem;color:var(--green-400);margin-bottom:8px">🔗 連携手順</h4>
+    <ol style="font-size:0.8rem;color:var(--text-secondary);padding-left:16px;line-height:1.5;margin:0 space-y-1">
+      <li>FreshGuardのLINE公式アカウント（Bot）を友だち追加します。</li>
+      <li>トーク画面で「<b>ID</b>」と送信します。</li>
+      <li>Botがあなたの「<b>LINEユーザーID</b>」を即座に返信します。</li>
+      <li>そのIDをコピーして、以下のフォームに入力し保存してください。</li>
+    </ol>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label" for="lineUserId">LINE ユーザーID</label>
+    <input class="form-control" id="lineUserId" type="text" placeholder="例: Ua1234567890abcdef..." style="font-family:monospace;font-size:0.9rem">
+  </div>
+
+  <button class="btn btn-secondary" onclick="testLineNotify()" id="testLineBtn">
+    🔔 LINE連携のテスト送信
+  </button>
+  <div id="lineMsg" style="display:none;margin-top:10px;font-size:0.85rem"></div>
+</div>
+
+<!-- 保存ボタン -->
+<button class="btn btn-primary" style="min-width:160px;margin-bottom:24px" onclick="saveAll()">💾 設定を保存</button>
+<div id="saveMsg" class="alert alert-success" style="display:none;margin-top:12px"></div>
+
+<div class="divider"></div>
+
+<!-- データ管理 -->
+<div class="card section">
+  <div class="section-title">🗄️ データ管理</div>
+  <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px">
+    現在、在庫データはすべてサーバーの <b>SQLite データベース</b> に保存されています。
+  </p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button class="btn btn-secondary" onclick="exportData()">📤 データをエクスポート (JSON)</button>
+    <button class="btn btn-danger"    onclick="clearData()">🗑 在庫を全削除</button>
+  </div>
+  <div id="dataMsg" style="display:none;margin-top:10px"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const s = getSettings();
+  document.getElementById('fridgeTemp').value = s.fridgeTemp ?? 4;
+  document.getElementById('regionTemp').value = s.regionTemp ?? 22;
+  document.getElementById('location').value   = s.location   ?? '';
+  document.getElementById('lat').value        = s.lat        ?? 35.6762;
+  document.getElementById('lon').value        = s.lon        ?? 139.6503;
+  document.getElementById('lineUserId').value = s.lineUserId ?? '';
+});
+
+function saveAll() {
+  const s = {
+    fridgeTemp:  parseFloat(document.getElementById('fridgeTemp').value) || 4,
+    regionTemp:  parseFloat(document.getElementById('regionTemp').value) || 22,
+    location:    document.getElementById('location').value.trim(),
+    lat:         parseFloat(document.getElementById('lat').value) || 35.6762,
+    lon:         parseFloat(document.getElementById('lon').value) || 139.6503,
+    lineUserId:  document.getElementById('lineUserId').value.trim()
+  };
+  saveSettings(s);
+
+  const msg = document.getElementById('saveMsg');
+  msg.textContent    = '✅ 設定を保存しました！';
+  msg.style.display  = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 3000);
+}
+
+function getLocation() {
+  if (!navigator.geolocation) {
+    showGpsMsg('❌ このブラウザは位置情報に対応していません', true);
+    return;
+  }
+  document.getElementById('gpsBtn').textContent = '📍 取得中...';
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      document.getElementById('lat').value = pos.coords.latitude.toFixed(4);
+      document.getElementById('lon').value = pos.coords.longitude.toFixed(4);
+      document.getElementById('gpsBtn').textContent = '📍 現在地を自動取得';
+      showGpsMsg('✅ 現在地を取得しました。「設定を保存」を押して確定してください。');
+    },
+    err => {
+      document.getElementById('gpsBtn').textContent = '📍 現在地を自動取得';
+      showGpsMsg('❌ 位置情報の取得に失敗しました: ' + err.message, true);
+    }
+  );
+}
+
+function showGpsMsg(msg, isError = false) {
+  const el = document.getElementById('gpsMsg');
+  el.textContent   = msg;
+  el.style.color   = isError ? 'var(--red-400)' : 'var(--green-400)';
+  el.style.display = 'block';
+}
+
+function testLineNotify() {
+  const lineUserId = document.getElementById('lineUserId').value.trim();
+  if (!lineUserId) {
+    showLineMsg('❌ LINEユーザーIDを入力してからテストしてください。', true);
+    return;
+  }
+  
+  // まず設定を自動で保存します
+  saveAll();
+  
+  document.getElementById('testLineBtn').textContent = '⏳ テスト送信中...';
+  const xhr = new XMLHttpRequest();
+  xhr.open('GET', '/api/cron?test=true', true); // 非同期
+  xhr.onload = function() {
+    document.getElementById('testLineBtn').textContent = '🔔 LINE連携のテスト送信';
+    if (xhr.status === 200) {
+      showLineMsg('✅ LINEにテストメッセージを送信しました！チャットを確認してください。');
+    } else {
+      let err = '送信に失敗しました。';
+      try { err = JSON.parse(xhr.responseText).error || err; } catch(_) {}
+      showLineMsg('❌ ' + err, true);
+    }
+  };
+  xhr.onerror = function() {
+    document.getElementById('testLineBtn').textContent = '🔔 LINE連携のテスト送信';
+    showLineMsg('❌ 通信エラーが発生しました。', true);
+  };
+  xhr.send();
+}
+
+function showLineMsg(msg, isError = false) {
+  const el = document.getElementById('lineMsg');
+  el.textContent   = msg;
+  el.style.color   = isError ? 'var(--red-400)' : 'var(--green-400)';
+  el.style.display = 'block';
+}
+
+function exportData() {
+  const data = { inventory: getInventory(), settings: getSettings(), exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `freshguard_backup_${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function clearData() {
+  if (!confirm('SQLite上のすべての在庫データを削除しますか？この操作は取り消せません。')) return;
+  
+  // すべてのIDを取得して削除を実行
+  const items = getInventory();
+  items.forEach(item => {
+    deleteItem(item.id);
+  });
+  
+  const msg = document.getElementById('dataMsg');
+  msg.className    = 'alert alert-success';
+  msg.textContent  = '✅ 在庫データをSQLiteからすべて削除しました。';
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 3000);
+}
+</script>
+{% endblock %}

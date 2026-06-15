@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ログイン - FreshGuard</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .auth-wrapper {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+      background: radial-gradient(circle at top right, rgba(34, 197, 94, 0.08), transparent 40%), var(--bg-primary);
+    }
+    .auth-card {
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+    .auth-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      font-size: 1.6rem;
+      font-weight: 800;
+      margin-bottom: 28px;
+    }
+    .auth-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .auth-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .auth-footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+    .auth-link {
+      color: var(--green-400);
+      font-weight: 600;
+      transition: var(--transition);
+    }
+    .auth-link:hover {
+      color: var(--text-primary);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+<div class="auth-wrapper">
+  <div class="card auth-card fade-in">
+    <div class="auth-logo">
+      <span class="logo-icon">🥗</span>
+      <span class="logo-text">FreshGuard</span>
+    </div>
+    
+    <h2 class="auth-title">おかえりなさい！</h2>
+    <p class="auth-subtitle">ログインしてあなたの冷蔵庫を管理しましょう</p>
+    
+    <div id="alertBox" class="alert alert-danger" style="display: none;"></div>
+    
+    <form id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="username">ユーザー名</label>
+        <input class="form-control" id="username" name="username" type="text" placeholder="ユーザー名を入力" required autofocus>
+      </div>
+      
+      <div class="form-group" style="margin-bottom: 24px;">
+        <label class="form-label" for="password">パスワード</label>
+        <input class="form-control" id="password" name="password" type="password" placeholder="パスワードを入力" required>
+      </div>
+      
+      <button class="btn btn-primary btn-full pulse-glow" id="submitBtn" type="submit">
+        <span>ログイン</span>
+      </button>
+    </form>
+    
+    <div class="auth-footer">
+      アカウントをお持ちでないですか？ <a href="/register" class="auth-link">新規登録はこちら</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const alertBox = document.getElementById('alertBox');
+    const submitBtn = document.getElementById('submitBtn');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    
+    alertBox.style.display = 'none';
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span>ログイン中...</span>';
+    
+    try {
+      const response = await fetch('/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          username: usernameInput.value,
+          password: passwordInput.value
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        // ログイン成功 -> リダイレクト
+        window.location.href = data.redirect || '/';
+      } else {
+        // エラーの表示
+        alertBox.textContent = '❌ ' + (data.error || 'ログインに失敗しました。');
+        alertBox.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<span>ログイン</span>';
+      }
+    } catch (err) {
+      alertBox.textContent = '❌ 通信エラーが発生しました。';
+      alertBox.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<span>ログイン</span>';
+    }
+  });
+</script>
+</body>
+</html>

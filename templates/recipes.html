@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}AIレシピ提案{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>🍳 AIレシピ提案</h1>
+  <p>消費期限が近い食材から、Gemini AIがレシピを提案します</p>
+</div>
+
+<!-- 食材選択 -->
+<div class="card section">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div class="section-title" style="margin:0">使用する食材</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-secondary" style="font-size:0.8rem;padding:6px 12px" onclick="setUseAll(false)" id="btnUrgent">⚠️ 期限近い食材</button>
+      <button class="btn btn-secondary" style="font-size:0.8rem;padding:6px 12px" onclick="setUseAll(true)"  id="btnAll">📦 すべての食材</button>
+    </div>
+  </div>
+
+  <div id="ingredientChips" style="display:flex;flex-wrap:wrap;gap:8px;min-height:40px;margin-bottom:20px">
+    <span style="color:var(--text-muted);font-size:0.85rem">読み込み中...</span>
+  </div>
+
+  <div id="noIngredients" class="alert alert-info" style="display:none;margin-bottom:16px">
+    消費期限が近い食材がありません。「すべての食材」から選んでください。
+  </div>
+
+  <button class="btn btn-primary btn-full" id="generateBtn" onclick="generateRecipe()" disabled>
+    <span id="generateLabel">📝 レシピを生成する</span>
+  </button>
+</div>
+
+<!-- エラー -->
+<div id="errorMsg" class="alert alert-danger" style="display:none"></div>
+
+<!-- レシピ出力 -->
+<div id="recipeCard" class="card section" style="display:none">
+  <div class="section-title">✨ 提案されたレシピ</div>
+  <div class="divider"></div>
+  <div class="recipe-output" id="recipeOutput"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let useAll = false;
+let allItems = [];
+
+document.addEventListener('DOMContentLoaded', () => {
+  const settings = getSettings();
+  allItems = processInventory(getInventory(), settings);
+  renderChips();
+});
+
+function setUseAll(flag) {
+  useAll = flag;
+  document.getElementById('btnUrgent').style.background = flag ? '' : 'var(--green-glow)';
+  document.getElementById('btnAll').style.background    = flag ? 'var(--green-glow)' : '';
+  renderChips();
+}
+
+function getIngredients() {
+  if (useAll) return allItems.map(i => i.name);
+  return allItems.filter(i => i.status === 'warning' || i.status === 'danger').map(i => i.name);
+}
+
+function renderChips() {
+  const ings  = getIngredients();
+  const el    = document.getElementById('ingredientChips');
+  const noEl  = document.getElementById('noIngredients');
+  const btn   = document.getElementById('generateBtn');
+
+  if (ings.length === 0) {
+    el.innerHTML = '';
+    noEl.style.display = 'block';
+    btn.disabled = true;
+  } else {
+    noEl.style.display = 'none';
+    btn.disabled = false;
+    el.innerHTML = ings.map(name => {
+      const item   = allItems.find(i => i.name === name);
+      const cls    = item ? (item.status === 'danger' ? 'chip-danger' : item.status === 'warning' ? 'chip-warning' : 'chip') : 'chip';
+      return `<span class="${cls}">${name}</span>`;
+    }).join('');
+  }
+}
+
+async function generateRecipe() {
+  const ings = getIngredients();
+  if (ings.length === 0) return;
+
+  const btn   = document.getElementById('generateBtn');
+  const label = document.getElementById('generateLabel');
+  const errEl = document.getElementById('errorMsg');
+  const card  = document.getElementById('recipeCard');
+  const out   = document.getElementById('recipeOutput');
+
+  btn.disabled   = true;
+  label.textContent = '⏳ 生成中...';
+  errEl.style.display  = 'none';
+  card.style.display   = 'none';
+
+  try {
+    const res = await fetch('/api/recipe', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ingredients: ings })
+    });
+    const data = await res.json();
+
+    if (!res.ok) throw new Error(data.error || 'レシピの生成に失敗しました');
+
+    out.innerHTML      = renderMarkdown(data.recipe);
+    card.style.display = 'block';
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    errEl.textContent    = '❌ ' + e.message;
+    errEl.style.display  = 'block';
+  } finally {
+    btn.disabled      = false;
+    label.textContent = '📝 レシピを生成する';
+  }
+}
+
+// ── シンプルなMarkdownパーサー ────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\* (.+)$/gm,   '<ul><li>$1</li></ul>')
+    .replace(/^- (.+)$/gm,    '<ul><li>$1</li></ul>')
+    .replace(/^\d+\. (.+)$/gm,'<ol><li>$1</li></ol>')
+    .replace(/\n\n/g, '<br>')
+    .replace(/\n/g, '<br>');
+}
+
+// 初期: 期限近い食材モード
+setUseAll(false);
+</script>
+{% endblock %}

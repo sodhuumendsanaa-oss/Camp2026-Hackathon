@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}ダッシュボード{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>📊 ダッシュボード</h1>
+  <p>現在の食材状況と冷蔵庫の温度管理</p>
+</div>
+
+<!-- SDGs Eco & Price-Saving Dashboard Tracker -->
+<div class="card section" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: var(--radius); padding: 20px; margin-bottom: 24px;">
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+    <span style="font-size:1.4rem;">🌿</span>
+    <h2 style="font-size:1.15rem; font-weight:700; margin:0; letter-spacing:0.02em; color:var(--text-primary);">Eco家計簿 & ロス削減カウンター</h2>
+  </div>
+  <div class="grid-3" style="gap:16px; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+    <div style="background:rgba(34, 197, 94, 0.06); border: 1px solid rgba(74, 222, 128, 0.15); border-radius:12px; padding:16px; text-align:center; transition:var(--transition);" class="eco-card-saved">
+      <div style="font-size:0.8rem; color:var(--text-muted); font-weight:600; margin-bottom:6px;">🍳 節約できたお得額</div>
+      <div style="font-size:1.6rem; font-weight:800; color:var(--green-400);" id="savedMoneyVal">¥0</div>
+    </div>
+    <div style="background:rgba(239, 68, 68, 0.06); border: 1px solid rgba(248, 113, 113, 0.15); border-radius:12px; padding:16px; text-align:center; transition:var(--transition);" class="eco-card-lost">
+      <div style="font-size:0.8rem; color:var(--text-muted); font-weight:600; margin-bottom:6px;">🗑️ 無駄にした損失額</div>
+      <div style="font-size:1.6rem; font-weight:800; color:var(--red-400);" id="lostMoneyVal">¥0</div>
+    </div>
+    <div style="background:rgba(59, 130, 246, 0.06); border: 1px solid rgba(96, 165, 250, 0.15); border-radius:12px; padding:16px; text-align:center; transition:var(--transition);" class="eco-card-co2">
+      <div style="font-size:0.8rem; color:var(--text-muted); font-weight:600; margin-bottom:6px;">🌿 CO2削減量</div>
+      <div style="font-size:1.6rem; font-weight:800; color:var(--blue-400);" id="co2ReductionVal">0.00 kg</div>
+    </div>
+  </div>
+</div>
+
+<!-- ステータスカード -->
+<div class="grid-3 section" id="statsGrid">
+  <div class="card" style="border-color: rgba(248,113,113,0.3);">
+    <div class="card-title">🚨 期限切れ / 今日中</div>
+    <div class="card-value status-danger" id="countDanger">--</div>
+    <div class="progress-bar"><div class="progress-fill" id="barDanger" style="background: var(--red-400); width:0%"></div></div>
+  </div>
+  <div class="card" style="border-color: rgba(250,204,21,0.3);">
+    <div class="card-title">⚠️ 要注意（1〜3日）</div>
+    <div class="card-value status-warning" id="countWarning">--</div>
+    <div class="progress-bar"><div class="progress-fill" id="barWarning" style="background: var(--yellow-400); width:0%"></div></div>
+  </div>
+  <div class="card" style="border-color: rgba(74,222,128,0.3);">
+    <div class="card-title">✅ 良好</div>
+    <div class="card-value status-fresh" id="countFresh">--</div>
+    <div class="progress-bar"><div class="progress-fill" id="barFresh" style="background: var(--green-400); width:0%"></div></div>
+  </div>
+</div>
+
+<!-- 温度情報 -->
+<div class="grid-2 section" id="tempGrid">
+  <div class="card">
+    <div class="card-title">❄️ 冷蔵庫温度</div>
+    <div class="card-value" id="fridgeTempVal" style="color:var(--blue-400)">-- °C</div>
+    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:6px">設定から変更できます</p>
+  </div>
+  <div class="card">
+    <div class="card-title">🌡️ 現在の外気温</div>
+    <div class="card-value" id="regionTempVal" style="color:var(--green-400)">-- °C</div>
+    <p style="color:var(--text-muted);font-size:0.8rem;margin-top:6px" id="locationLabel">--</p>
+  </div>
+</div>
+
+<!-- 期限が近い食材リスト -->
+<div class="section">
+  <div class="section-title">🔔 期限が近い食材</div>
+  <div class="item-list" id="urgentList">
+    <div class="empty-state"><div class="empty-icon">⏳</div><p>読み込み中...</p></div>
+  </div>
+</div>
+
+<!-- 全食材サマリー -->
+<div class="section">
+  <div class="section-title" style="justify-content:space-between">
+    <span>📦 在庫サマリー</span>
+    <a href="/inventory" class="btn btn-secondary" style="font-size:0.8rem;padding:6px 14px">すべて見る →</a>
+  </div>
+  <div class="item-list" id="allList">
+    <div class="empty-state"><div class="empty-icon">📦</div><p>読み込み中...</p></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const settings  = getSettings();
+  const rawItems  = getInventory();
+  const items     = processInventory(rawItems, settings);
+
+  // ── Eco家計簿 & SDGsカウンター描画 ────────────────────
+  const savedMoney = Math.round(settings.saved_money || 0);
+  const lostMoney = Math.round(settings.lost_money || 0);
+  const co2Reduction = (savedMoney * 1.5) / 1000.0; // グラムをkg換算 (食資源セーブで1円=1.5g CO2削減効果モデル)
+
+  document.getElementById('savedMoneyVal').textContent = `¥${savedMoney.toLocaleString()}`;
+  document.getElementById('lostMoneyVal').textContent = `¥${lostMoney.toLocaleString()}`;
+  document.getElementById('co2ReductionVal').textContent = `${co2Reduction.toFixed(2)} kg`;
+
+  // ── ステータスカード ──────────────────────────────
+  const danger  = items.filter(i => i.status === 'danger');
+  const warning = items.filter(i => i.status === 'warning');
+  const fresh   = items.filter(i => i.status === 'fresh');
+  const total   = items.length || 1;
+
+  document.getElementById('countDanger').textContent  = danger.length;
+  document.getElementById('countWarning').textContent = warning.length;
+  document.getElementById('countFresh').textContent   = fresh.length;
+
+  setTimeout(() => {
+    document.getElementById('barDanger').style.width  = `${(danger.length  / total) * 100}%`;
+    document.getElementById('barWarning').style.width = `${(warning.length / total) * 100}%`;
+    document.getElementById('barFresh').style.width   = `${(fresh.length   / total) * 100}%`;
+  }, 100);
+
+  // ── 温度表示 ─────────────────────────────────────
+  document.getElementById('fridgeTempVal').textContent = `${settings.fridgeTemp ?? 4} °C`;
+  document.getElementById('regionTempVal').textContent = `${settings.regionTemp ?? '--'} °C`;
+  document.getElementById('locationLabel').textContent = settings.location || '--';
+
+  // ── 期限が近い食材リスト ───────────────────────────
+  const urgent = [...danger, ...warning];
+  const urgentEl = document.getElementById('urgentList');
+  if (urgent.length === 0) {
+    urgentEl.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><p>期限が近い食材はありません</p></div>`;
+  } else {
+    urgentEl.innerHTML = urgent.map(item => itemRowHTML(item)).join('');
+  }
+
+  // ── 全食材サマリー（最大6件） ───────────────────────
+  const allEl = document.getElementById('allList');
+  if (items.length === 0) {
+    allEl.innerHTML = `<div class="empty-state"><div class="empty-icon">📦</div><p>食材がありません。<a href="/scan" style="color:var(--green-400)">登録する →</a></p></div>`;
+  } else {
+    allEl.innerHTML = items.slice(0, 6).map(item => itemRowHTML(item)).join('');
+  }
+});
+
+function itemRowHTML(item) {
+  const badgeClass = { fresh:'badge-fresh', warning:'badge-warning', danger:'badge-danger' }[item.status] || 'badge-info';
+  const statusText = { fresh:'良好', warning:'要注意', danger:'期限切れ/今日中' }[item.status] || item.status;
+  const days = item.displayDaysLeft;
+  const daysText = days < 0 ? `${Math.abs(days)}日超過` : days === 0 ? '今日まで' : `残り${days}日`;
+  const cat = CATEGORY_LABELS[item.category] || item.category;
+
+  return `
+    <div class="item-row">
+      <div class="item-info">
+        <div class="item-name">${item.name}</div>
+        <div class="item-meta">${cat} ・ ${STORAGE_LABELS[item.storageType] || ''} ・ ${item.quantity}${item.unit}</div>
+      </div>
+      <div class="item-actions">
+        <span class="badge ${badgeClass}">${statusText}</span>
+        <span style="font-size:0.78rem;color:var(--text-muted);min-width:70px;text-align:right">${daysText}</span>
+      </div>
+    </div>`;
+}
+</script>
+{% endblock %}
